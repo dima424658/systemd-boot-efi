@@ -1,0 +1,68 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build systemd-boot",
+            "type": "shell",
+            "command": "meson compile",
+            "options": {
+                "cwd": "${workspaceFolder}/builddir"
+            },
+            "problemMatcher": {
+                "base": "$gcc",
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Create sdboot",
+            "type": "shell",
+            "command": "rm -f ${workspaceFolder}/builddir/sdboot.{in,out}; mkfifo ${workspaceFolder}/builddir/sdboot.{in,out}",
+        },
+        {
+            "label": "Run QEMU",
+            "type": "shell",
+            "command": "echo 'QEMU started'; qemu-system-x86_64 -net none -bios /usr/share/edk2/x64/OVMF.fd -kernel ${workspaceFolder}/builddir/efi/systemd-bootx64.efi -monitor none -nographic -serial pipe:${workspaceFolder}/builddir/sdboot -s",
+            "dependsOn": [
+                "Build systemd-boot",
+                "Create sdboot"
+            ],
+            "isBackground": true,
+            "problemMatcher": [
+                {
+                    "pattern": [
+                        {
+                            "regexp": ".",
+                            "file": 1,
+                            "location": 2,
+                            "message": 3
+                        }
+                    ],
+                    "background": {
+                        "activeOnStart": true,
+                        "beginsPattern": ".",
+                        "endsPattern": "QEMU started",
+                    }
+                }
+            ]
+        },
+        {
+            "label": "Create GDB config",
+            "type": "shell",
+            "command": "sh",
+            "args": [
+                "${workspaceFolder}/tools/debug-sd-boot.sh",
+                "${workspaceFolder}/builddir/efi/systemd-bootx64.efi",
+                "${workspaceFolder}/builddir/sdboot.out",
+                "${workspaceFolder}/builddir/systemd-boot.gdb"
+            ],
+            "dependsOn": [
+                "Run QEMU"
+            ]
+        }
+    ]
+}
