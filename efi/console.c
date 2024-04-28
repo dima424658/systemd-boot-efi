@@ -35,8 +35,9 @@ static void event_closep(EFI_EVENT *event) {
  * will replace ConInEx permanently if it ever reports a key press.
  * Lastly, a timer event allows us to provide a input timeout without having to call into
  * any input functions that can freeze on us or using a busy/stall loop. */
-EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
+EFI_STATUS console_key_read(uint64_t *key, EFI_SIMPLE_POINTER_STATE* mouse_state, uint64_t timeout_usec) {
         static EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL *conInEx = NULL, *extraInEx = NULL;
+        static EFI_SIMPLE_POINTER_PROTOCOL* mouse = NULL;
         static bool checked = false;
         size_t index;
         EFI_STATUS err;
@@ -67,16 +68,35 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
                 checked = true;
         }
 
+        if (!mouse) {
+                err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_SIMPLE_POINTER_PROTOCOL), NULL, (void**) &mouse);
+                if (err != EFI_SUCCESS)
+                        log_error_status(err, "Error locating pointer protocol: %m");
+                else
+                {
+                        assert(mouse);
+                        err = mouse->Reset(mouse, true);
+                        if (err != EFI_SUCCESS)
+                                log_error_status(err, "Error resetting mouse: %m");
+                }
+        }
+
         err = BS->CreateEvent(EVT_TIMER, 0, NULL, NULL, &timer);
         if (err != EFI_SUCCESS)
                 return log_error_status(err, "Error creating timer event: %m");
 
+        size_t n_events = 2;
         EFI_EVENT events[] = {
                 timer,
                 conInEx ? conInEx->WaitForKeyEx : ST->ConIn->WaitForKey,
-                extraInEx ? extraInEx->WaitForKeyEx : NULL,
+                NULL,
+                NULL
         };
-        size_t n_events = extraInEx ? 3 : 2;
+        if (extraInEx)
+                events[n_events++] = extraInEx->WaitForKeyEx;
+
+        if (mouse_state && mouse)
+                events[n_events++] = mouse->WaitForInput;
 
         /* Watchdog rearming loop in case the user never provides us with input or some
          * broken firmware never returns from WaitForEvent. */
@@ -113,6 +133,14 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
 
                 /* The caller requested a timeout? They shall have one! */
                 return EFI_TIMEOUT;
+        }
+
+        if (mouse_state && BS->CheckEvent(mouse->WaitForInput) == EFI_SUCCESS) {
+                err = mouse->GetState(mouse, mouse_state);
+                if (err != EFI_SUCCESS)
+                        log_error_status(err, "Error getting mouse state: %m");
+
+                return EFI_SUCCESS;
         }
 
         /* If the extra input device we found returns something, always use that instead

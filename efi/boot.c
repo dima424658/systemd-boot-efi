@@ -184,7 +184,7 @@ static bool line_edit(char16_t **line_in, size_t x_max, size_t y_pos) {
                         print_at(cursor + 1, y_pos, cursor_color, print + cursor);
                         cursor_color = EFI_TEXT_ATTR_SWAP(cursor_color);
 
-                        err = console_key_read(&key, 750 * 1000);
+                        err = console_key_read(&key, NULL, 750 * 1000);
                         if (!IN_SET(err, EFI_SUCCESS, EFI_TIMEOUT, EFI_NOT_READY))
                                 return false;
 
@@ -457,7 +457,7 @@ static bool ps_continue(void) {
         printf("\n%ls Press any key to continue, ESC or q to quit. %ls\n\n", sep, sep);
 
         uint64_t key;
-        return console_key_read(&key, UINT64_MAX) == EFI_SUCCESS &&
+        return console_key_read(&key, NULL, UINT64_MAX) == EFI_SUCCESS &&
                         !IN_SET(key, KEYPRESS(0, SCAN_ESC, 0), KEYPRESS(0, 0, 'q'), KEYPRESS(0, 0, 'Q'));
 }
 
@@ -697,7 +697,7 @@ static bool menu_run(
 
         size_t line_width = 0, entry_padding = 3;
         while (IN_SET(action, ACTION_CONTINUE, ACTION_FIRMWARE_SETUP)) {
-                uint64_t key;
+                uint64_t key = 0;
 
                 if (new_mode) {
                         console_query_mode(&x_max, &y_max);
@@ -834,7 +834,8 @@ static bool menu_run(
                 if (config->beep)
                         beep(idx_highlight + 1);
 
-                err = console_key_read(&key, timeout_remain > 0 ? 1000 * 1000 : UINT64_MAX);
+                EFI_SIMPLE_POINTER_STATE mouse_state = {0};
+                err = console_key_read(&key, &mouse_state, timeout_remain > 0 ? 1000 * 1000 : UINT64_MAX);
                 if (err == EFI_NOT_READY)
                         /* No input device returned a key, try again. This
                          * normally should not happen. */
@@ -870,6 +871,16 @@ static bool menu_run(
                         /* Any key other than newline or a failed attempt cancel the request. */
                         action = ACTION_CONTINUE;
                         continue;
+                }
+
+                if(mouse_state.LeftButton)
+                        action = ACTION_RUN;
+                if(mouse_state.RightButton)
+                {
+                        if (idx_highlight >= config->n_entries-1)
+                                idx_highlight = 0;
+                        else
+                                ++idx_highlight;
                 }
 
                 switch (key) {
@@ -2694,7 +2705,7 @@ static EFI_STATUS run(EFI_HANDLE image) {
                 uint64_t key;
 
                 /* Block up to 100ms to give firmware time to get input working. */
-                err = console_key_read(&key, 100 * 1000);
+                err = console_key_read(&key, NULL, 100 * 1000);
                 if (err == EFI_SUCCESS) {
                         /* find matching key in boot entries */
                         size_t idx = entry_lookup_key(&config, config.idx_default, KEYCHAR(key));
